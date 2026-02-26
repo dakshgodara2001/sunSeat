@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SunSeat</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f5f5f5;
+    color: #222;
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1rem;
+  }
+
+  .container { max-width: 420px; width: 100%; }
+
+  h1 { font-size: 1.5rem; margin-bottom: 1.5rem; text-align: center; }
+
+  /* ---- Form ---- */
+  form { display: flex; flex-direction: column; gap: 0.75rem; }
+
+  label { font-size: 0.85rem; font-weight: 600; }
+
+  input[type="text"],
+  input[type="datetime-local"] {
+    width: 100%;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 0.95rem;
+  }
+
+  button {
+    padding: 0.6rem;
+    border: none;
+    border-radius: 6px;
+    background: #2563eb;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: #1d4ed8; }
+  button:disabled { background: #93b4f5; cursor: wait; }
+
+  /* ---- Result area ---- */
+  #result { margin-top: 1.75rem; display: none; }
+
+  /* ---- Car diagram ---- */
+  .car {
+    width: 200px;
+    margin: 0 auto 1rem;
+    border: 3px solid #333;
+    border-radius: 40px 40px 16px 16px;
+    overflow: hidden;
+    position: relative;
+  }
+  .car::before {
+    content: "FRONT";
+    display: block;
+    text-align: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: #888;
+    padding: 6px 0 2px;
+    background: #e9e9e9;
+  }
+  .car-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+  .seat {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 80px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #333;
+    border: 1px solid #d0d0d0;
+    background: #e4e4e4;
+    transition: background 0.3s;
+  }
+  .seat.best  { background: #4ade80; color: #14532d; }
+  .seat.worst { background: #f87171; color: #7f1d1d; }
+
+  .seat-label { display: block; font-size: 0.7rem; font-weight: 400; margin-top: 2px; }
+
+  /* ---- Summary / confidence ---- */
+  .summary {
+    text-align: center;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    margin-bottom: 0.5rem;
+  }
+
+  .confidence {
+    text-align: center;
+    margin-top: 0.5rem;
+  }
+  .badge {
+    display: inline-block;
+    padding: 0.2rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .badge.high     { background: #bbf7d0; color: #166534; }
+  .badge.moderate { background: #fef08a; color: #854d0e; }
+  .badge.low      { background: #fecaca; color: #991b1b; }
+
+  /* ---- Error ---- */
+  .error {
+    text-align: center;
+    color: #dc2626;
+    font-size: 0.9rem;
+    margin-top: 1rem;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>SunSeat</h1>
+
+  <form id="trip-form">
+    <div>
+      <label for="origin">Origin</label>
+      <input type="text" id="origin" placeholder="e.g. New York, NY" required>
+    </div>
+    <div>
+      <label for="destination">Destination</label>
+      <input type="text" id="destination" placeholder="e.g. Newark, NJ" required>
+    </div>
+    <div>
+      <label for="departure">Departure time (UTC)</label>
+      <input type="datetime-local" id="departure" required>
+    </div>
+    <button type="submit" id="submit-btn">Find best seat</button>
+  </form>
+
+  <div id="error" class="error"></div>
+
+  <div id="result">
+    <div class="car">
+      <div class="car-grid">
+        <div class="seat" id="seat-FL">FL<span class="seat-label">Front Left</span></div>
+        <div class="seat" id="seat-FR">FR<span class="seat-label">Front Right</span></div>
+        <div class="seat" id="seat-RL">RL<span class="seat-label">Rear Left</span></div>
+        <div class="seat" id="seat-RR">RR<span class="seat-label">Rear Right</span></div>
+      </div>
+    </div>
+    <p class="summary" id="summary"></p>
+    <div class="confidence" id="confidence"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var form      = document.getElementById("trip-form");
+  var btn       = document.getElementById("submit-btn");
+  var errorEl   = document.getElementById("error");
+  var resultEl  = document.getElementById("result");
+  var summaryEl = document.getElementById("summary");
+  var confEl    = document.getElementById("confidence");
+  var seats     = ["FL", "FR", "RL", "RR"];
+
+  // Default the datetime picker to now (rounded to the minute).
+  var now = new Date();
+  now.setSeconds(0, 0);
+  document.getElementById("departure").value = now.toISOString().slice(0, 16);
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    errorEl.textContent = "";
+    resultEl.style.display = "none";
+
+    var origin      = document.getElementById("origin").value.trim();
+    var destination = document.getElementById("destination").value.trim();
+    var departure   = document.getElementById("departure").value;
+
+    if (!origin || !destination || !departure) {
+      errorEl.textContent = "Please fill in all fields.";
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Searching\u2026";
+
+    fetch("/recommend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        origin: origin,
+        destination: destination,
+        departure_time: departure + ":00Z"
+      })
+    })
+    .then(function (res) {
+      if (!res.ok) {
+        return res.json().then(function (body) {
+          throw new Error(body.detail || "Request failed (" + res.status + ")");
+        });
+      }
+      return res.json();
+    })
+    .then(function (data) {
+      // Reset seat classes
+      seats.forEach(function (s) {
+        var el = document.getElementById("seat-" + s);
+        el.classList.remove("best", "worst");
+      });
+
+      // Highlight best / worst
+      document.getElementById("seat-" + data.best_seat).classList.add("best");
+      document.getElementById("seat-" + data.worst_seat).classList.add("worst");
+
+      summaryEl.textContent = data.summary;
+      confEl.innerHTML =
+        'Confidence: <span class="badge ' + data.confidence + '">' +
+        data.confidence + "</span>";
+
+      resultEl.style.display = "block";
+    })
+    .catch(function (err) {
+      errorEl.textContent = err.message;
+    })
+    .finally(function () {
+      btn.disabled = false;
+      btn.textContent = "Find best seat";
+    });
+  });
+})();
+</script>
+</body>
+</html>
